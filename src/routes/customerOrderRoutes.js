@@ -4,6 +4,8 @@ const Razorpay = require('razorpay');
 const Order = require('../models/Order');
 const Customer = require('../models/Customer');
 const Vendor = require('../models/Vendor');
+const Category = require('../models/Category');
+const SystemSettings = require('../models/SystemSettings');
 const { protectCustomer } = require('../middleware/authMiddleware');
 
 // Initialize Razorpay client with User's credentials
@@ -87,6 +89,46 @@ router.post('/place', protectCustomer, async (req, res) => {
       if (v) verifiedVendorId = v._id;
     }
 
+    // Dynamic Commission Calculation:
+    // 1. Check if Category has a specific commission rate configured
+    // 2. Otherwise check Global SystemSettings default commission rate
+    // 3. Fallback to 5% default
+    let calculatedCommission = 0;
+    const materialCost = Number(totalAmount) - (Number(deliveryCharge) || 0); // Commission is charged on material cost
+    const baseAmountForCommission = materialCost > 0 ? materialCost : Number(totalAmount);
+
+    let commissionRate = 5; // default 5%
+    let isPercentage = true;
+
+    try {
+      if (category) {
+        const cat = await Category.findOne({
+          $or: [
+            { _id: category },
+            { name: new RegExp(`^${category}$`, 'i') },
+          ],
+        });
+        if (cat && cat.commissionRate != null) {
+          commissionRate = Number(cat.commissionRate);
+          isPercentage = cat.commissionType !== 'fixed';
+        }
+      }
+
+      if (commissionRate === 5) {
+        const settings = await SystemSettings.findOne();
+        if (settings && settings.defaultCommissionRate != null) {
+          commissionRate = Number(settings.defaultCommissionRate);
+          isPercentage = settings.commissionType !== 'fixed';
+        }
+      }
+    } catch (_) {}
+
+    if (isPercentage) {
+      calculatedCommission = Math.round((baseAmountForCommission * commissionRate) / 100);
+    } else {
+      calculatedCommission = Math.round(commissionRate);
+    }
+
     const newOrder = await Order.create({
       orderId,
       customer: req.customer.fullName || 'Valued Customer',
@@ -98,7 +140,7 @@ router.post('/place', protectCustomer, async (req, res) => {
       items,
       totalAmount: Number(totalAmount),
       deliveryCharge: Number(deliveryCharge) || 0,
-      adminCommission: Math.round(Number(totalAmount) * 0.05), // 5% default
+      adminCommission: calculatedCommission,
       paymentMode: paymentMode || 'COD',
       paymentId: paymentId || '',
       razorpayOrderId: razorpayOrderId || '',
