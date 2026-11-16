@@ -22,7 +22,26 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Serve uploaded media files publicly (App-wise & Category-wise)
+// 1. First check local disk:
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// 2. If not on local disk (e.g. after Render restart/container redeploy), fallback to MongoDB Atlas MediaFile:
+const MediaFile = require('./models/MediaFile');
+app.get(/^\/uploads\/(.+)/, async (req, res, next) => {
+  try {
+    const requestUrl = req.originalUrl.split('?')[0];
+    const media = await MediaFile.findOne({ url: requestUrl });
+    if (media && media.data) {
+      res.setHeader('Content-Type', media.mimetype || 'image/jpeg');
+      res.setHeader('Cache-Control', 'public, max-age=31536000');
+      return res.send(media.data);
+    }
+    return next();
+  } catch (err) {
+    console.error('[MediaFile Stream Error]:', err);
+    return next();
+  }
+});
 
 // Health Check Route
 app.get('/api/health', (req, res) => {
