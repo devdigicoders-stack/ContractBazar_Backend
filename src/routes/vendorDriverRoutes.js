@@ -138,6 +138,77 @@ router.put('/:id/status', protectVendor, async (req, res) => {
   }
 });
 
+// @route   PUT /api/vendor/drivers/:id
+// @desc    Update driver profile, vehicle details, and KYC documents
+// @access  Protected (Vendor)
+router.put('/:id', protectVendor, async (req, res) => {
+  try {
+    const {
+      name,
+      phone,
+      vehicleType,
+      vehicleNumber,
+      drivingLicenseNumber,
+      drivingLicenseDocument,
+      aadhaarNumber,
+      aadhaarDocument,
+      rcDocument,
+      profilePhoto,
+    } = req.body;
+
+    const driver = await Driver.findOne({
+      _id: req.params.id,
+      vendorId: req.vendor._id,
+    });
+
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found in your fleet',
+      });
+    }
+
+    if (name) driver.name = name.trim();
+    if (phone) {
+      const cleanPhone = phone.toString().trim();
+      // Check if another driver has this phone
+      if (cleanPhone !== driver.phone) {
+        const exist = await Driver.findOne({ phone: cleanPhone });
+        if (exist) {
+          return res.status(400).json({
+            success: false,
+            message: `Phone number +91 ${cleanPhone} is already in use by another driver`,
+          });
+        }
+        driver.phone = cleanPhone;
+      }
+    }
+    if (vehicleType) driver.vehicleType = vehicleType;
+    if (vehicleNumber) driver.vehicleNumber = vehicleNumber.trim().toUpperCase();
+    if (drivingLicenseNumber !== undefined) driver.drivingLicenseNumber = drivingLicenseNumber.trim().toUpperCase();
+    if (drivingLicenseDocument) driver.drivingLicenseDocument = drivingLicenseDocument;
+    if (aadhaarNumber !== undefined) driver.aadhaarNumber = aadhaarNumber.trim();
+    if (aadhaarDocument) driver.aadhaarDocument = aadhaarDocument;
+    if (rcDocument) driver.rcDocument = rcDocument;
+    if (profilePhoto) driver.profilePhoto = profilePhoto;
+
+    await driver.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Driver '${driver.name}' details updated successfully!`,
+      driver,
+    });
+  } catch (error) {
+    console.error('[Vendor Edit Driver Error]:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update driver details',
+      error: error.message,
+    });
+  }
+});
+
 // @route   DELETE /api/vendor/drivers/:id
 // @desc    Remove driver from vendor fleet
 // @access  Protected (Vendor)
