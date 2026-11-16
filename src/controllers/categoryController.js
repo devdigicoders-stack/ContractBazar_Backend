@@ -98,7 +98,7 @@ const getCategories = async (req, res) => {
 // @access  Private (Admin Protected)
 const createCategory = async (req, res) => {
   try {
-    const { name, commissionType, commissionRate, hindiName, status, units, description } = req.body;
+    const { name, commissionType, commissionRate, hindiName, status, units, description, image, icon } = req.body;
 
     if (!name || name.trim() === '') {
       return res.status(400).json({
@@ -141,6 +141,8 @@ const createCategory = async (req, res) => {
       status: status === 'Inactive' ? 'Inactive' : 'Active',
       units: Array.isArray(units) ? units : (units ? [units] : []),
       description: description ? description.trim() : '',
+      image: image ? image.trim() : '',
+      icon: icon ? icon.trim() : '',
     });
 
     await newCategory.save();
@@ -162,7 +164,7 @@ const createCategory = async (req, res) => {
 const updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, commissionType, commissionRate, hindiName, status, units, description } = req.body;
+    const { name, commissionType, commissionRate, hindiName, status, units, description, image, icon } = req.body;
 
     const category = await Category.findById(id);
     if (!category) {
@@ -193,6 +195,12 @@ const updateCategory = async (req, res) => {
     }
     if (description !== undefined) {
       category.description = description.trim();
+    }
+    if (image !== undefined) {
+      category.image = image ? image.trim() : '';
+    }
+    if (icon !== undefined) {
+      category.icon = icon ? icon.trim() : '';
     }
 
     await category.save();
