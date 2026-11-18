@@ -90,6 +90,61 @@ app.use('/api/delivery/auth', require('./routes/deliveryAuthRoutes'));
 app.use('/api/admin/auth', require('./routes/adminAuthRoutes'));
 app.use('/api/admin/panel', require('./routes/adminPanelRoutes'));
 
+// Test FCM Push Notification Endpoint (App-wise testing)
+const { sendPushNotification } = require('./services/notificationService');
+const Customer = require('./models/Customer');
+const Vendor = require('./models/Vendor');
+const Driver = require('./models/Driver');
+
+app.post('/api/test/fcm', async (req, res) => {
+  try {
+    const { appType, token, phone, title, body, data } = req.body;
+    let targetTokens = [];
+
+    if (token) {
+      targetTokens = [token];
+    } else if (phone && appType) {
+      if (appType === 'customer') {
+        const user = await Customer.findOne({ phone: String(phone) });
+        if (user && user.fcmToken) targetTokens.push(user.fcmToken);
+      } else if (appType === 'vendor') {
+        const user = await Vendor.findOne({ mobileNumber: String(phone) });
+        if (user && user.fcmToken) targetTokens.push(user.fcmToken);
+      } else if (appType === 'delivery') {
+        const user = await Driver.findOne({ phone: String(phone) });
+        if (user && user.fcmToken) targetTokens.push(user.fcmToken);
+      }
+    }
+
+    if (targetTokens.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No FCM token found. Provide "token" directly, or valid "phone" and "appType" (customer | vendor | delivery) where user has registered a token.',
+      });
+    }
+
+    const defaultTitle = title || `🔔 Test Notification for ${appType || 'App'}`;
+    const defaultBody = body || `Ye test notification Contract Bazar backend se bheja gaya hai (${new Date().toLocaleTimeString()})`;
+
+    const result = await sendPushNotification({
+      tokens: targetTokens,
+      title: defaultTitle,
+      body: defaultBody,
+      data: data || { type: 'TEST', appType: appType || 'all' },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'FCM push sent successfully',
+      appType,
+      targetTokensCount: targetTokens.length,
+      result,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 404 Route Handler
 app.use((req, res) => {
   res.status(404).json({
