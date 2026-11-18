@@ -119,7 +119,7 @@ router.post('/verify-otp', async (req, res) => {
 // @access  Public / Protected
 router.put('/profile', async (req, res) => {
   try {
-    const { phone, fullName, emailAddress, profilePhoto, userType, companyName, gstNumber } = req.body;
+    const { phone, fullName, emailAddress, profilePhoto, userType, companyName, gstNumber, fcmToken } = req.body;
 
     if (!phone) {
       return res.status(400).json({ success: false, message: 'Phone number is required' });
@@ -138,6 +138,7 @@ router.put('/profile', async (req, res) => {
     if (userType !== undefined) customer.userType = userType;
     if (companyName !== undefined) customer.companyName = companyName;
     if (gstNumber !== undefined) customer.gstNumber = gstNumber;
+    if (fcmToken !== undefined) customer.fcmToken = fcmToken;
 
     await customer.save();
 
@@ -148,6 +149,27 @@ router.put('/profile', async (req, res) => {
     });
   } catch (error) {
     console.error('[Customer Update Profile Error]:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/customer/auth/fcm-token
+// @desc    Sync FCM Device Token for Customer
+// @access  Public
+router.post('/fcm-token', async (req, res) => {
+  try {
+    const { phone, fcmToken } = req.body;
+    if (!phone || !fcmToken) {
+      return res.status(400).json({ success: false, message: 'Phone and fcmToken are required' });
+    }
+    const cleanPhone = phone.trim().slice(-10);
+    await Customer.findOneAndUpdate(
+      { mobileNumber: cleanPhone },
+      { fcmToken },
+      { upsert: false }
+    );
+    return res.status(200).json({ success: true, message: 'FCM token updated' });
+  } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 });

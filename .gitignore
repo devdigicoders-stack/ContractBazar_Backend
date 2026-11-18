@@ -103,3 +103,9 @@ Thumbs.db
 *.swo
 *~
 
+# Firebase Service Account Credentials
+config/firebase-service-account*.json
+config/firebase-service-account*.txt
+firebase-service-account*.json
+
+

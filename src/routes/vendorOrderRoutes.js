@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
+const Driver = require('../models/Driver');
+const Customer = require('../models/Customer');
 const { protectVendor } = require('../middleware/authMiddleware');
+const { sendPushNotification } = require('../services/notificationService');
 
 // All routes here are isolated per logged-in vendor (req.vendor._id)
 
@@ -126,6 +129,23 @@ router.put('/:id/accept', protectVendor, async (req, res) => {
     order.status = 'Confirmed';
     await order.save();
 
+    // Notify Customer about Order Confirmation
+    try {
+      if (order.customerId) {
+        const custDoc = await Customer.findById(order.customerId);
+        if (custDoc && custDoc.fcmToken) {
+          sendPushNotification({
+            tokens: custDoc.fcmToken,
+            title: '✅ Order Confirmed!',
+            body: `${order.vendor} ne aapka order (#${order.orderId}) accept kar liya hai. Material taiyar kiya ja raha hai.`,
+            data: { orderId: order.orderId, type: 'ORDER_CONFIRMED' },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Order Confirm Error]:', pushErr.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Order accepted successfully!',
@@ -169,6 +189,41 @@ router.put('/:id/dispatch', protectVendor, async (req, res) => {
     if (vehicleNumber) order.vehicleNumber = vehicleNumber;
 
     await order.save();
+
+    // 1. Notify Customer that order is dispatched
+    try {
+      if (order.customerId) {
+        const custDoc = await Customer.findById(order.customerId);
+        if (custDoc && custDoc.fcmToken) {
+          sendPushNotification({
+            tokens: custDoc.fcmToken,
+            title: '🚚 Gadi Dispatch Ho Gayi!',
+            body: `Aapka order (#${order.orderId}) gadi (${vehicleNumber || 'Tractor'}) se nikal chuka hai. Delivery OTP: ${order.deliveryOtp || 'Ready'}`,
+            data: { orderId: order.orderId, type: 'ORDER_DISPATCHED' },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Order Dispatch Cust Error]:', pushErr.message);
+    }
+
+    // 2. Notify Delivery Driver that a new trip is assigned
+    try {
+      if (driverPhone) {
+        const cleanDriverPhone = driverPhone.toString().trim();
+        const driverDoc = await Driver.findOne({ phone: cleanDriverPhone });
+        if (driverDoc && driverDoc.fcmToken) {
+          sendPushNotification({
+            tokens: driverDoc.fcmToken,
+            title: '🚨 Nayi Delivery Duty Assigned!',
+            body: `${order.vendor} ne aapko Order (#${order.orderId}) assign kiya hai. Site: ${order.siteAddress}`,
+            data: { orderId: order.orderId, type: 'TRIP_ASSIGNED' },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Order Dispatch Driver Error]:', pushErr.message);
+    }
 
     return res.status(200).json({
       success: true,

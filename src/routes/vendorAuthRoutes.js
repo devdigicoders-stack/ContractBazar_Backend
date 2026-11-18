@@ -398,5 +398,22 @@ router.get('/me', async (req, res) => {
   }
 });
 
+// @route   POST /api/vendor/auth/fcm-token
+// @desc    Sync FCM Device Token for Vendor
+// @access  Public / Protected
+router.post('/fcm-token', async (req, res) => {
+  try {
+    const { phone, vendorId, fcmToken } = req.body;
+    if (!fcmToken || (!phone && !vendorId)) {
+      return res.status(400).json({ success: false, message: 'Phone/VendorId and fcmToken are required' });
+    }
+    const filter = vendorId ? { _id: vendorId } : { mobileNumber: phone.toString().trim() };
+    await Vendor.findOneAndUpdate(filter, { fcmToken });
+    return res.status(200).json({ success: true, message: 'Vendor FCM token updated' });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 module.exports = router;
 

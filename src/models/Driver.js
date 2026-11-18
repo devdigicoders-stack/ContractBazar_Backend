@@ -101,6 +101,10 @@ const driverSchema = new mongoose.Schema(
       type: Number,
       default: 4.8,
     },
+    fcmToken: {
+      type: String,
+      default: '',
+    },
   },
   {
     timestamps: true,

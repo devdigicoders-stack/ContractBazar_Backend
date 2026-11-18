@@ -7,6 +7,7 @@ const Vendor = require('../models/Vendor');
 const Category = require('../models/Category');
 const SystemSettings = require('../models/SystemSettings');
 const { protectCustomer } = require('../middleware/authMiddleware');
+const { sendPushNotification } = require('../services/notificationService');
 
 // Initialize Razorpay client with User's credentials
 const razorpay = new Razorpay({
@@ -153,6 +154,23 @@ router.post('/place', protectCustomer, async (req, res) => {
       distanceKm: Number(distanceKm) || 0,
       orderNotes: orderNotes || '',
     });
+
+    // Notify Vendor via FCM
+    try {
+      if (verifiedVendorId) {
+        const vendorDoc = await Vendor.findById(verifiedVendorId);
+        if (vendorDoc && vendorDoc.fcmToken) {
+          sendPushNotification({
+            tokens: vendorDoc.fcmToken,
+            title: '🔔 Naya Order Prapt Hua!',
+            body: `${newOrder.customer} ne ₹${newOrder.totalAmount} ka naya order (#${newOrder.orderId}) diya hai.`,
+            data: { orderId: newOrder.orderId, type: 'NEW_ORDER' },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Order Place Notification Error]:', pushErr.message);
+    }
 
     return res.status(201).json({
       success: true,

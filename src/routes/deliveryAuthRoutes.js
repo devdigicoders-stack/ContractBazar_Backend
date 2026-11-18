@@ -4,6 +4,9 @@ const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const Driver = require('../models/Driver');
 const Order = require('../models/Order');
+const Vendor = require('../models/Vendor');
+const Customer = require('../models/Customer');
+const { sendPushNotification } = require('../services/notificationService');
 
 // Helper to generate JWT Token
 const generateToken = (id) => {
@@ -265,6 +268,40 @@ router.post('/orders/:id/verify-and-complete', async (req, res) => {
       );
     }
 
+    // 1. Notify Customer that order has been delivered
+    try {
+      if (order.customerId) {
+        const custDoc = await Customer.findById(order.customerId);
+        if (custDoc && custDoc.fcmToken) {
+          sendPushNotification({
+            tokens: custDoc.fcmToken,
+            title: '🎉 Material Delivered Ho Gaya!',
+            body: `Aapka order (#${order.orderId}) safaltapoorvak deliver ho gaya hai. Contract Bazar use karne ke liye dhanyawad!`,
+            data: { orderId: order.orderId, type: 'ORDER_DELIVERED' },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Deliver Cust Error]:', pushErr.message);
+    }
+
+    // 2. Notify Vendor that delivery is complete & payment collected
+    try {
+      if (order.vendorId) {
+        const vendorDoc = await Vendor.findById(order.vendorId);
+        if (vendorDoc && vendorDoc.fcmToken) {
+          sendPushNotification({
+            tokens: vendorDoc.fcmToken,
+            title: '💰 Order Delivered & Payment Done!',
+            body: `Driver ne Order (#${order.orderId}) deliver kar diya hai. Total: ₹${order.totalAmount}`,
+            data: { orderId: order.orderId, type: 'VENDOR_ORDER_DELIVERED' },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Deliver Vendor Error]:', pushErr.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Trip delivered successfully! POD saved and payment marked Paid.',
@@ -440,6 +477,23 @@ router.get('/profile', async (req, res) => {
         createdAt: driver.createdAt,
       },
     });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/delivery/fcm-token
+// @desc    Sync FCM Device Token for Delivery Driver
+// @access  Public / Protected
+router.post('/fcm-token', async (req, res) => {
+  try {
+    const { phone, driverId, fcmToken } = req.body;
+    if (!fcmToken || (!phone && !driverId)) {
+      return res.status(400).json({ success: false, message: 'Phone/DriverId and fcmToken are required' });
+    }
+    const filter = driverId ? { _id: driverId } : { phone: phone.toString().trim() };
+    await Driver.findOneAndUpdate(filter, { fcmToken });
+    return res.status(200).json({ success: true, message: 'Driver FCM token updated' });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }

@@ -173,6 +173,10 @@ const vendorSchema = new mongoose.Schema(
       of: Number,
       default: {},
     },
+    fcmToken: {
+      type: String,
+      default: '',
+    },
   },
   {
     timestamps: true,
