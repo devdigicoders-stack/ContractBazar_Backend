@@ -4,6 +4,7 @@ const Order = require('../models/Order');
 const SystemSettings = require('../models/SystemSettings');
 const Driver = require('../models/Driver');
 const Product = require('../models/Product');
+const { sendPushNotification } = require('../services/notificationService');
 
 // ==========================================
 // OPTIMIZED DASHBOARD STATS (Fast Parallel Aggregate)
@@ -242,6 +243,26 @@ const updateVendorStatus = async (req, res) => {
     if (customCommissions !== undefined) vendor.customCommissions = customCommissions;
 
     await vendor.save();
+
+    // Trigger FCM push notification to Vendor on status changes (Approved/Rejected/Blocked)
+    if (vendor.fcmToken && status) {
+      if (status === 'Approved') {
+        sendPushNotification(
+          vendor.fcmToken,
+          '🎉 Badhaai Ho! Account Approved',
+          'Admin dwara aapka Vendor account verify aur approve kar diya gaya hai. Ab aap orders lena shuru kar sakte hain!',
+          { type: 'ACCOUNT_STATUS', status: 'Approved' }
+        ).catch(() => {});
+      } else if (status === 'Rejected') {
+        sendPushNotification(
+          vendor.fcmToken,
+          '⚠️ Account Application Rejected',
+          rejectionReason ? `Aapka account reject ho gaya hai: ${rejectionReason}` : 'Aapka application approve nahi ho saka. Kripya details check karein.',
+          { type: 'ACCOUNT_STATUS', status: 'Rejected' }
+        ).catch(() => {});
+      }
+    }
+
     return res.status(200).json({ success: true, message: `Vendor status updated to ${vendor.status}`, vendor });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -653,6 +674,26 @@ const updateDriverStatus = async (req, res) => {
     }
 
     await driver.save();
+
+    // Trigger FCM notification to Driver on status approval/rejection
+    if (driver.fcmToken && status) {
+      if (status === 'Approved') {
+        sendPushNotification(
+          driver.fcmToken,
+          '🎉 Delivery Partner ID Approved',
+          'Aapka delivery account verify ho gaya hai. Ab aap delivery orders receive kar sakte hain!',
+          { type: 'DRIVER_STATUS', status: 'Approved' }
+        ).catch(() => {});
+      } else if (status === 'Rejected') {
+        sendPushNotification(
+          driver.fcmToken,
+          '⚠️ Delivery Application Status',
+          rejectionReason ? `Aapka application reject ho gaya hai: ${rejectionReason}` : 'Aapki application approve nahi hui.',
+          { type: 'DRIVER_STATUS', status: 'Rejected' }
+        ).catch(() => {});
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: `Driver status updated to ${driver.status}`,
