@@ -65,8 +65,32 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      default: 'Pending',
+      default: 'Order Placed',
     },
+    internalStatus: {
+      type: String,
+      default: 'Order Placed',
+    },
+    rejectionReason: {
+      type: String,
+      default: '',
+    },
+    cancellationReason: {
+      type: String,
+      default: '',
+    },
+    cancelledBy: {
+      type: String,
+      default: '',
+    },
+    timeline: [
+      {
+        status: { type: String, required: true },
+        title: { type: String, required: true },
+        description: { type: String, default: '' },
+        time: { type: Date, default: Date.now },
+      },
+    ],
     driver: {
       type: String,
       default: 'Not Assigned',

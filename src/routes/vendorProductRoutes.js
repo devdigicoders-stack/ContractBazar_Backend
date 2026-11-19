@@ -2,6 +2,41 @@ const express = require('express');
 const router = express.Router();
 const Product = require('../models/Product');
 const { protectVendor } = require('../middleware/authMiddleware');
+const { sendPushNotification } = require('../services/notificationService');
+
+// Helper to notify subscribed customers when a product is restocked
+async function notifySubscribersOnRestock(product, oldStock, newStock) {
+  try {
+    const wasOutOfStock = oldStock <= 0 || product.inStock === false;
+    const isNowInStock = newStock > 0 && product.inStock === true;
+
+    if (wasOutOfStock && isNowInStock && product.stockSubscribers && product.stockSubscribers.length > 0) {
+      const tokens = product.stockSubscribers
+        .map((s) => s.fcmToken)
+        .filter((tok) => tok && tok.length > 10);
+
+      if (tokens.length > 0) {
+        console.log(`[Restock Alert] Notifying ${tokens.length} customers for product: ${product.name}`);
+        await sendPushNotification({
+          tokens,
+          title: '🎉 Item Back In Stock!',
+          body: `${product.name} ab uplabdh hai! Jaldi order karein isse pehle ki stock khatam ho jaye.`,
+          data: {
+            productId: product._id.toString(),
+            category: product.categoryName || '',
+            type: 'PRODUCT_BACK_IN_STOCK',
+          },
+        });
+      }
+
+      // Clear subscribers list after notifying
+      product.stockSubscribers = [];
+      await product.save();
+    }
+  } catch (err) {
+    console.warn('[Notify Restock Subscribers Warning]:', err.message);
+  }
+}
 
 // All catalog and rate endpoints are strictly isolated per logged-in vendor
 
@@ -152,13 +187,24 @@ router.put('/:id', protectVendor, async (req, res) => {
       'isActive',
     ];
 
+    const previousStock = product.availableStock != null ? product.availableStock : 1000;
+
     updatableFields.forEach((field) => {
       if (req.body[field] !== undefined) {
         product[field] = req.body[field];
       }
     });
 
+    if (product.availableStock !== undefined && product.availableStock <= 0) {
+      product.inStock = false;
+    } else if (product.availableStock > 0 && req.body.inStock === undefined) {
+      product.inStock = true;
+    }
+
     await product.save();
+
+    // Check if restocked and notify interested customers
+    await notifySubscribersOnRestock(product, previousStock, product.availableStock);
 
     return res.status(200).json({
       success: true,
@@ -194,12 +240,24 @@ router.put('/:id/rate', protectVendor, async (req, res) => {
       });
     }
 
+    const previousStock = product.availableStock != null ? product.availableStock : 1000;
+
     if (price !== undefined) product.price = Number(price);
     if (discountPrice !== undefined) product.discountPrice = discountPrice ? Number(discountPrice) : null;
     if (inStock !== undefined) product.inStock = Boolean(inStock);
-    if (availableStock !== undefined) product.availableStock = Number(availableStock);
+    if (availableStock !== undefined) {
+      product.availableStock = Number(availableStock);
+      if (product.availableStock <= 0) {
+        product.inStock = false;
+      } else if (inStock === undefined) {
+        product.inStock = true;
+      }
+    }
 
     await product.save();
+
+    // Check if restocked and notify
+    await notifySubscribersOnRestock(product, previousStock, product.availableStock);
 
     return res.status(200).json({
       success: true,

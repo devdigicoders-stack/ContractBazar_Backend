@@ -81,19 +81,23 @@ router.get('/vendors', async (req, res) => {
           isStoreOnline: v.isStoreOnline,
           categories: v.businessCategories,
           productsCount: products.length,
-          products: products.map((p) => ({
-            id: p._id,
-            name: p.name,
-            categoryName: p.categoryName,
-            brandName: p.brandName,
-            unit: p.unit,
-            price: p.price,
-            discountPrice: p.discountPrice,
-            inStock: p.inStock,
-            image: p.image,
-            images: p.images,
-            description: p.description,
-          })),
+          products: products.map((p) => {
+            const isAvailable = (p.availableStock == null || p.availableStock > 0) && p.inStock !== false;
+            return {
+              id: p._id,
+              name: p.name,
+              categoryName: p.categoryName,
+              brandName: p.brandName,
+              unit: p.unit,
+              price: p.price,
+              discountPrice: p.discountPrice,
+              inStock: isAvailable,
+              isOutOfStock: !isAvailable,
+              image: p.image,
+              images: p.images,
+              description: p.description,
+            };
+          }),
         };
       })
     );
@@ -126,6 +130,33 @@ router.get('/vendors/:id', async (req, res) => {
       isActive: true,
     }).sort({ inStock: -1, price: 1 });
 
+    // Transform products: Never reveal exact raw availableStock, mark inStock: false if availableStock <= 0
+    const sanitizedProducts = products.map((p) => {
+      const isAvailable = (p.availableStock == null || p.availableStock > 0) && p.inStock !== false;
+      return {
+        _id: p._id,
+        id: p._id,
+        vendorId: p.vendorId,
+        vendorName: p.vendorName,
+        name: p.name,
+        categoryName: p.categoryName,
+        brandName: p.brandName,
+        qualityGrade: p.qualityGrade,
+        unit: p.unit,
+        price: p.price,
+        discountPrice: p.discountPrice,
+        minOrderQuantity: p.minOrderQuantity,
+        maxOrderQuantity: p.maxOrderQuantity,
+        inStock: isAvailable,
+        isOutOfStock: !isAvailable,
+        image: p.image,
+        images: p.images,
+        description: p.description,
+        dimensions: p.dimensions,
+        weight: p.weight,
+      };
+    });
+
     return res.status(200).json({
       success: true,
       vendor: {
@@ -143,10 +174,50 @@ router.get('/vendors/:id', async (req, res) => {
         perKmCharge: vendor.perKmCharge || 15.0,
         isStoreOnline: vendor.isStoreOnline,
         categories: vendor.businessCategories,
-        products,
+        products: sanitizedProducts,
       },
     });
   } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   POST /api/customer/catalog/products/:id/notify-me
+// @desc    Customer registers for restock push notifications
+// @access  Public / Optional Auth
+router.post('/products/:id/notify-me', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { phone, fcmToken, customerId } = req.body;
+
+    const product = await Product.findById(id);
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
+    }
+
+    if (!product.stockSubscribers) product.stockSubscribers = [];
+
+    // Avoid duplicate subscriber
+    const alreadySubscribed = product.stockSubscribers.some(
+      (sub) => (phone && sub.phone === phone) || (fcmToken && sub.fcmToken === fcmToken)
+    );
+
+    if (!alreadySubscribed) {
+      product.stockSubscribers.push({
+        customerId: customerId || null,
+        phone: phone || '',
+        fcmToken: fcmToken || '',
+        subscribedAt: new Date(),
+      });
+      await product.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Aapko product restock hone par push notification bhej diya jayega!',
+    });
+  } catch (error) {
+    console.error('[Notify Me Error]:', error);
     return res.status(500).json({ success: false, message: error.message });
   }
 });

@@ -8,6 +8,17 @@ const { sendPushNotification } = require('../services/notificationService');
 
 // All routes here are isolated per logged-in vendor (req.vendor._id)
 
+// Helper to push timeline entry if not already present
+function addTimelineEntry(order, status, title, description) {
+  if (!order.timeline) order.timeline = [];
+  order.timeline.push({
+    status,
+    title,
+    description: description || '',
+    time: new Date(),
+  });
+}
+
 // @route   GET /api/vendor/orders
 // @desc    Get all orders belonging strictly to the logged-in vendor
 // @access  Protected (Vendor)
@@ -22,7 +33,10 @@ router.get('/', protectVendor, async (req, res) => {
     };
 
     if (status && status !== 'All') {
-      filter.status = status;
+      filter.$or = [
+        { status: status },
+        { internalStatus: status },
+      ];
     }
 
     const orders = await Order.find(filter).sort({ createdAt: -1 });
@@ -52,7 +66,14 @@ router.get('/incoming', protectVendor, async (req, res) => {
         { vendorId: req.vendor._id },
         { vendor: req.vendor.businessName },
       ],
-      status: { $in: ['Pending', 'Confirmed', 'Incoming'] },
+      $and: [
+        {
+          $or: [
+            { status: { $in: ['Order Placed', 'Pending', 'Incoming'] } },
+            { internalStatus: { $in: ['Order Placed', 'New Order Received', 'Pending'] } },
+          ],
+        },
+      ],
     };
 
     const orders = await Order.find(filter).sort({ createdAt: -1 });
@@ -73,7 +94,7 @@ router.get('/incoming', protectVendor, async (req, res) => {
 });
 
 // @route   GET /api/vendor/orders/:id
-// @desc    Get complete order details by ID
+// @desc    Get complete order details with customer and driver info
 // @access  Protected (Vendor)
 router.get('/:id', protectVendor, async (req, res) => {
   try {
@@ -83,7 +104,7 @@ router.get('/:id', protectVendor, async (req, res) => {
         { vendorId: req.vendor._id },
         { vendor: req.vendor.businessName },
       ],
-    });
+    }).populate('customerId', 'fullName mobileNumber profilePic');
 
     if (!order) {
       return res.status(404).json({
@@ -107,7 +128,7 @@ router.get('/:id', protectVendor, async (req, res) => {
 });
 
 // @route   PUT /api/vendor/orders/:id/accept
-// @desc    Accept incoming order (Changes status from Pending -> Confirmed/Preparing)
+// @desc    Vendor accepts incoming order -> Order Confirmed
 // @access  Protected (Vendor)
 router.put('/:id/accept', protectVendor, async (req, res) => {
   try {
@@ -126,7 +147,9 @@ router.put('/:id/accept', protectVendor, async (req, res) => {
       });
     }
 
-    order.status = 'Confirmed';
+    order.status = 'Order Confirmed';
+    order.internalStatus = 'Order Accepted';
+    addTimelineEntry(order, 'Order Confirmed', 'Order Confirmed', 'Vendor has accepted your order.');
     await order.save();
 
     // Notify Customer about Order Confirmation
@@ -137,11 +160,11 @@ router.put('/:id/accept', protectVendor, async (req, res) => {
           sendPushNotification({
             tokens: custDoc.fcmToken,
             title: '✅ Order Confirmed!',
-            body: `${order.vendor} ne aapka order (#${order.orderId}) accept kar liya hai. Material taiyar kiya ja raha hai.`,
+            body: `${order.vendor} ne aapka order (#${order.orderId}) accept kar liya hai.`,
             data: {
               orderId: order.orderId,
               category: order.category || '',
-              status: 'Confirmed',
+              status: 'Order Confirmed',
               type: 'ORDER_CONFIRMED',
             },
           });
@@ -166,9 +189,239 @@ router.put('/:id/accept', protectVendor, async (req, res) => {
   }
 });
 
-// @route   PUT /api/vendor/orders/:id/dispatch
-// @desc    Mark order as Dispatched / Out for Delivery & assign driver / vehicle
+// @route   PUT /api/vendor/orders/:id/reject
+// @desc    Vendor rejects incoming order with reason
 // @access  Protected (Vendor)
+router.put('/:id/reject', protectVendor, async (req, res) => {
+  try {
+    const { rejectionReason } = req.body;
+    const order = await Order.findOne({
+      _id: req.params.id,
+      $or: [
+        { vendorId: req.vendor._id },
+        { vendor: req.vendor.businessName },
+      ],
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found for your shop',
+      });
+    }
+
+    order.status = 'Cancelled';
+    order.internalStatus = 'Order Rejected';
+    order.rejectionReason = rejectionReason || 'Product unavailable or out of delivery area';
+    order.cancelledBy = 'Vendor';
+    addTimelineEntry(order, 'Cancelled', 'Order Rejected', order.rejectionReason);
+    await order.save();
+
+    // Notify Customer about Order Rejection
+    try {
+      if (order.customerId) {
+        const custDoc = await Customer.findById(order.customerId);
+        if (custDoc && custDoc.fcmToken) {
+          sendPushNotification({
+            tokens: custDoc.fcmToken,
+            title: '❌ Order Rejected by Vendor',
+            body: `Aapka order (#${order.orderId}) vendor dwara reject kiya gaya hai. Reason: ${order.rejectionReason}`,
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              status: 'Cancelled',
+              type: 'ORDER_REJECTED',
+            },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Order Reject Error]:', pushErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Order rejected successfully',
+      order,
+    });
+  } catch (error) {
+    console.error('[Vendor Reject Order Error]:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to reject order',
+      error: error.message,
+    });
+  }
+});
+
+// @route   PUT /api/vendor/orders/:id/status
+// @desc    Update vendor processing status: Processing, Packed, Ready for Pickup
+// @access  Protected (Vendor)
+router.put('/:id/status', protectVendor, async (req, res) => {
+  try {
+    const { status } = req.body; // 'Processing' | 'Packed' | 'Ready for Pickup'
+    const order = await Order.findOne({
+      _id: req.params.id,
+      $or: [
+        { vendorId: req.vendor._id },
+        { vendor: req.vendor.businessName },
+      ],
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found for your shop',
+      });
+    }
+
+    order.internalStatus = status;
+
+    if (status === 'Processing') {
+      order.status = 'Processing';
+      addTimelineEntry(order, 'Processing', 'Seller Processing', 'Seller is preparing your order.');
+    } else if (status === 'Packed') {
+      order.status = 'Packed';
+      addTimelineEntry(order, 'Packed', 'Packed', 'Your product is packed and ready.');
+    } else if (status === 'Ready for Pickup') {
+      order.internalStatus = 'Ready for Pickup';
+      addTimelineEntry(order, 'Packed', 'Ready for Pickup', 'Order is ready for delivery boy pickup.');
+    }
+
+    await order.save();
+
+    // Notify Customer if Packed
+    if (status === 'Packed') {
+      try {
+        if (order.customerId) {
+          const custDoc = await Customer.findById(order.customerId);
+          if (custDoc && custDoc.fcmToken) {
+            sendPushNotification({
+              tokens: custDoc.fcmToken,
+              title: '📦 Order Packed!',
+              body: `Aapka order (#${order.orderId}) pack ho chuka hai aur dispatch ke liye taiyar hai.`,
+              data: {
+                orderId: order.orderId,
+                category: order.category || '',
+                status: 'Packed',
+                type: 'ORDER_PACKED',
+              },
+            });
+          }
+        }
+      } catch (pushErr) {}
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Status updated to ${status}`,
+      order,
+    });
+  } catch (error) {
+    console.error('[Vendor Update Status Error]:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update order status',
+      error: error.message,
+    });
+  }
+});
+
+// @route   PUT /api/vendor/orders/:id/assign-driver
+// @desc    Assign order to delivery boy
+// @access  Protected (Vendor)
+router.put('/:id/assign-driver', protectVendor, async (req, res) => {
+  try {
+    const { driverId, driverName, driverPhone, vehicleNumber } = req.body;
+
+    const order = await Order.findOne({
+      _id: req.params.id,
+      $or: [
+        { vendorId: req.vendor._id },
+        { vendor: req.vendor.businessName },
+      ],
+    });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found for your shop',
+      });
+    }
+
+    order.driver = driverName || 'Assigned Driver';
+    order.driverPhone = driverPhone || '';
+    order.vehicleNumber = vehicleNumber || '';
+    order.internalStatus = 'Order Assigned';
+    addTimelineEntry(
+      order,
+      order.status,
+      'Delivery Partner Assigned',
+      `Assigned to ${order.driver} (${order.vehicleNumber || 'Vehicle'})`
+    );
+
+    await order.save();
+
+    // 1. Notify Driver via FCM
+    try {
+      if (driverPhone) {
+        const cleanDriverPhone = driverPhone.toString().trim();
+        const driverDoc = await Driver.findOne({ phone: cleanDriverPhone });
+        if (driverDoc && driverDoc.fcmToken) {
+          sendPushNotification({
+            tokens: driverDoc.fcmToken,
+            title: '🚨 Naya Order Assign Hua!',
+            body: `${order.vendor} ne aapko Order (#${order.orderId}) assign kiya hai. Site: ${order.siteAddress}`,
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              type: 'ORDER_ASSIGNED',
+            },
+          });
+        }
+      }
+    } catch (driverPushErr) {
+      console.warn('[FCM Driver Assign Error]:', driverPushErr.message);
+    }
+
+    // 2. Notify Customer
+    try {
+      if (order.customerId) {
+        const custDoc = await Customer.findById(order.customerId);
+        if (custDoc && custDoc.fcmToken) {
+          sendPushNotification({
+            tokens: custDoc.fcmToken,
+            title: '🚚 Delivery Boy Assigned',
+            body: `Aapke order (#${order.orderId}) ke liye ${order.driver} (${order.vehicleNumber || ''}) assign ho gaya hai.`,
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              status: order.status,
+              type: 'DRIVER_ASSIGNED',
+            },
+          });
+        }
+      }
+    } catch (custPushErr) {
+      console.warn('[FCM Customer Driver Assign Error]:', custPushErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Delivery boy assigned successfully!',
+      order,
+    });
+  } catch (error) {
+    console.error('[Vendor Assign Driver Error]:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to assign driver',
+      error: error.message,
+    });
+  }
+});
+
+// Legacy backward compatibility route /dispatch
 router.put('/:id/dispatch', protectVendor, async (req, res) => {
   try {
     const { driver, vehicleNumber, driverPhone } = req.body;
@@ -188,70 +441,22 @@ router.put('/:id/dispatch', protectVendor, async (req, res) => {
       });
     }
 
-    order.status = 'Dispatched';
+    order.status = 'In Transit';
+    order.internalStatus = 'Handed Over to Delivery Boy';
     if (driver) order.driver = driver;
     if (driverPhone) order.driverPhone = driverPhone;
     if (vehicleNumber) order.vehicleNumber = vehicleNumber;
 
+    addTimelineEntry(order, 'In Transit', 'Handed Over to Delivery Boy', 'Package handed over to delivery boy.');
     await order.save();
-
-    // 1. Notify Customer that order is dispatched
-    try {
-      if (order.customerId) {
-        const custDoc = await Customer.findById(order.customerId);
-        if (custDoc && custDoc.fcmToken) {
-          sendPushNotification({
-            tokens: custDoc.fcmToken,
-            title: '🚚 Gadi Dispatch Ho Gayi!',
-            body: `Aapka order (#${order.orderId}) gadi (${vehicleNumber || 'Tractor'}) se nikal chuka hai. Delivery OTP: ${order.deliveryOtp || 'Ready'}`,
-            data: {
-              orderId: order.orderId,
-              category: order.category || '',
-              status: 'Dispatched',
-              type: 'ORDER_DISPATCHED',
-            },
-          });
-        }
-      }
-    } catch (pushErr) {
-      console.warn('[FCM Order Dispatch Cust Error]:', pushErr.message);
-    }
-
-    // 2. Notify Delivery Driver that a new trip is assigned
-    try {
-      if (driverPhone) {
-        const cleanDriverPhone = driverPhone.toString().trim();
-        const driverDoc = await Driver.findOne({ phone: cleanDriverPhone });
-        if (driverDoc && driverDoc.fcmToken) {
-          sendPushNotification({
-            tokens: driverDoc.fcmToken,
-            title: '🚨 Nayi Delivery Duty Assigned!',
-            body: `${order.vendor} ne aapko Order (#${order.orderId}) assign kiya hai. Site: ${order.siteAddress}`,
-            data: {
-              orderId: order.orderId,
-              category: order.category || '',
-              status: 'Dispatched',
-              type: 'TRIP_ASSIGNED',
-            },
-          });
-        }
-      }
-    } catch (pushErr) {
-      console.warn('[FCM Order Dispatch Driver Error]:', pushErr.message);
-    }
 
     return res.status(200).json({
       success: true,
-      message: 'Order marked as Dispatched!',
+      message: 'Order dispatched!',
       order,
     });
   } catch (error) {
-    console.error('[Vendor Dispatch Order Error]:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to dispatch order',
-      error: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 });
 
@@ -285,6 +490,9 @@ router.put('/:id/complete', protectVendor, async (req, res) => {
     }
 
     order.status = 'Delivered';
+    order.internalStatus = 'Delivered';
+    order.deliveredAt = new Date();
+    addTimelineEntry(order, 'Delivered', 'Delivered', 'Order delivered successfully.');
     await order.save();
 
     return res.status(200).json({
@@ -303,4 +511,3 @@ router.put('/:id/complete', protectVendor, async (req, res) => {
 });
 
 module.exports = router;
-

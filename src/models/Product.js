@@ -92,6 +92,14 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    stockSubscribers: [
+      {
+        customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+        phone: { type: String, default: '' },
+        fcmToken: { type: String, default: '' },
+        subscribedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   {
     timestamps: true,

@@ -169,12 +169,12 @@ router.get('/orders/assigned', async (req, res) => {
 });
 
 // @route   PUT /api/delivery/orders/:id/status
-// @desc    Update delivery trip status (e.g. Out for Delivery / Pickup from Bhattha)
+// @desc    Update delivery trip status with granular delivery boy steps & push notifications
 // @access  Public / Protected
 router.put('/orders/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, internalStatus } = req.body;
 
     const isObjectId = mongoose.Types.ObjectId.isValid(id);
     const order = await Order.findOne(
@@ -185,12 +185,127 @@ router.put('/orders/:id/status', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    order.status = status || 'Out for Delivery';
+    const targetInternal = internalStatus || status;
+
+    // Delivery Boy Statuses:
+    // 1. Accepted
+    // 2. Reached Vendor Location
+    // 3. Order Picked Up (Mapped customer status: Picked Up)
+    // 4. In Transit (Mapped customer status: In Transit)
+    // 5. Reached Customer Location
+    // 6. Out for Delivery (Mapped customer status: Out for Delivery)
+    // 7. Delivered (Mapped customer status: Delivered)
+
+    let customerFacingStatus = order.status;
+    let title = '';
+    let description = '';
+    let custNotifTitle = '';
+    let custNotifBody = '';
+    let vendorNotifTitle = '';
+    let vendorNotifBody = '';
+
+    if (targetInternal === 'Accepted') {
+      order.internalStatus = 'Accepted';
+      title = 'Delivery Accepted';
+      description = `${order.driver || 'Delivery partner'} has accepted the delivery assignment.`;
+    } else if (targetInternal === 'Reached Vendor Location') {
+      order.internalStatus = 'Reached Vendor Location';
+      title = 'Driver Reached Bhattha/Store';
+      description = `${order.driver || 'Driver'} reached the vendor pickup location.`;
+      vendorNotifTitle = '📍 Driver Reached Shop/Bhattha';
+      vendorNotifBody = `Driver (${order.driver}) aapki dukaan/bhattha par pahunch gaya hai. Parcel hand over karein.`;
+    } else if (targetInternal === 'Order Picked Up') {
+      order.internalStatus = 'Order Picked Up';
+      order.status = 'Picked Up';
+      customerFacingStatus = 'Picked Up';
+      title = 'Picked Up';
+      description = 'Delivery partner has collected your order.';
+      custNotifTitle = '📦 Order Picked Up!';
+      custNotifBody = `Delivery partner (${order.driver}) ne aapka material bhattha/store se load kar liya hai.`;
+      vendorNotifTitle = '✅ Order Dispatched with Driver';
+      vendorNotifBody = `Driver ne Order (#${order.orderId}) collect kar liya hai.`;
+    } else if (targetInternal === 'In Transit') {
+      order.internalStatus = 'In Transit';
+      order.status = 'In Transit';
+      customerFacingStatus = 'In Transit';
+      title = 'In Transit';
+      description = 'Your order is on its way.';
+      custNotifTitle = '🚚 Order In Transit';
+      custNotifBody = `Aapka order raste me hai aur customer address ki taraf nikal chuka hai.`;
+    } else if (targetInternal === 'Reached Customer Location') {
+      order.internalStatus = 'Reached Customer Location';
+      title = 'Driver Reached Customer Site';
+      description = `${order.driver || 'Driver'} has arrived at your delivery address.`;
+      custNotifTitle = '📍 Driver Reached Your Site!';
+      custNotifBody = `Driver aapke location par pahunch gaya hai. Kripya unloading ki taiyari karein.`;
+    } else if (targetInternal === 'Out for Delivery') {
+      order.internalStatus = 'Out for Delivery';
+      order.status = 'Out for Delivery';
+      customerFacingStatus = 'Out for Delivery';
+      title = 'Out for Delivery';
+      description = 'Your order is on the way to your doorstep.';
+      custNotifTitle = '🚨 Out for Delivery!';
+      custNotifBody = `Aapka order delivery ke liye nikal chuka hai. Delivery OTP: ${order.deliveryOtp}`;
+    } else {
+      order.status = status || order.status;
+      order.internalStatus = targetInternal;
+      title = status;
+      description = `Order updated to ${status}`;
+    }
+
+    if (!order.timeline) order.timeline = [];
+    order.timeline.push({
+      status: customerFacingStatus,
+      title: title || customerFacingStatus,
+      description: description,
+      time: new Date(),
+    });
+
     await order.save();
+
+    // Push notification to Customer if applicable
+    if (custNotifTitle && order.customerId) {
+      try {
+        const custDoc = await Customer.findById(order.customerId);
+        if (custDoc && custDoc.fcmToken) {
+          sendPushNotification({
+            tokens: custDoc.fcmToken,
+            title: custNotifTitle,
+            body: custNotifBody,
+            data: {
+              orderId: order.orderId,
+              status: order.status,
+              internalStatus: order.internalStatus,
+              type: 'ORDER_STATUS_UPDATE',
+            },
+          });
+        }
+      } catch (e) {}
+    }
+
+    // Push notification to Vendor if applicable
+    if (vendorNotifTitle && order.vendorId) {
+      try {
+        const vendorDoc = await Vendor.findById(order.vendorId);
+        if (vendorDoc && vendorDoc.fcmToken) {
+          sendPushNotification({
+            tokens: vendorDoc.fcmToken,
+            title: vendorNotifTitle,
+            body: vendorNotifBody,
+            data: {
+              orderId: order.orderId,
+              status: order.status,
+              internalStatus: order.internalStatus,
+              type: 'VENDOR_ORDER_UPDATE',
+            },
+          });
+        }
+      } catch (e) {}
+    }
 
     return res.status(200).json({
       success: true,
-      message: `Order status updated to ${order.status}`,
+      message: `Order status updated to ${order.internalStatus}`,
       order,
     });
   } catch (error) {
@@ -236,7 +351,16 @@ router.post('/orders/:id/verify-and-complete', async (req, res) => {
 
     // Update Order Status to Delivered (Real-time sync with Customer App, Vendor App, Admin Panel)
     order.status = 'Delivered';
+    order.internalStatus = 'Delivered';
     order.deliveredAt = new Date();
+
+    if (!order.timeline) order.timeline = [];
+    order.timeline.push({
+      status: 'Delivered',
+      title: 'Delivered',
+      description: 'Your order has been delivered successfully.',
+      time: new Date(),
+    });
 
     // Payment collection logic (Flipkart style: Cash Collected / Pre-paid Online)
     if (order.paymentMode === 'COD') {
