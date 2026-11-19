@@ -175,9 +175,9 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`===============================================`);
-  console.log(`🚀 Contract Bazar Backend Server Running!`);
+  console.log(`🚀 Contract Bazar Backend Server Running on 0.0.0.0:${PORT}!`);
   console.log(`📡 URL: http://localhost:${PORT}`);
   console.log(`🛡️  Admin Auth: http://localhost:${PORT}/api/admin/auth/login`);
   console.log(`===============================================`);
