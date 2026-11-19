@@ -247,19 +247,19 @@ const updateVendorStatus = async (req, res) => {
     // Trigger FCM push notification to Vendor on status changes (Approved/Rejected/Blocked)
     if (vendor.fcmToken && status) {
       if (status === 'Approved') {
-        sendPushNotification(
-          vendor.fcmToken,
-          '🎉 Badhaai Ho! Account Approved',
-          'Admin dwara aapka Vendor account verify aur approve kar diya gaya hai. Ab aap orders lena shuru kar sakte hain!',
-          { type: 'ACCOUNT_STATUS', status: 'Approved' }
-        ).catch(() => {});
+        sendPushNotification({
+          tokens: vendor.fcmToken,
+          title: '🎉 Badhaai Ho! Account Approved',
+          body: 'Admin dwara aapka Vendor account verify aur approve kar diya gaya hai. Ab aap orders lena shuru kar sakte hain!',
+          data: { type: 'ACCOUNT_STATUS', status: 'Approved' }
+        }).catch((e) => console.warn('[FCM Vendor Approve Error]:', e.message));
       } else if (status === 'Rejected') {
-        sendPushNotification(
-          vendor.fcmToken,
-          '⚠️ Account Application Rejected',
-          rejectionReason ? `Aapka account reject ho gaya hai: ${rejectionReason}` : 'Aapka application approve nahi ho saka. Kripya details check karein.',
-          { type: 'ACCOUNT_STATUS', status: 'Rejected' }
-        ).catch(() => {});
+        sendPushNotification({
+          tokens: vendor.fcmToken,
+          title: '⚠️ Account Application Rejected',
+          body: rejectionReason ? `Aapka account reject ho gaya hai: ${rejectionReason}` : 'Aapka application approve nahi ho saka. Kripya details check karein.',
+          data: { type: 'ACCOUNT_STATUS', status: 'Rejected' }
+        }).catch((e) => console.warn('[FCM Vendor Reject Error]:', e.message));
       }
     }
 
@@ -678,19 +678,19 @@ const updateDriverStatus = async (req, res) => {
     // Trigger FCM notification to Driver on status approval/rejection
     if (driver.fcmToken && status) {
       if (status === 'Approved') {
-        sendPushNotification(
-          driver.fcmToken,
-          '🎉 Delivery Partner ID Approved',
-          'Aapka delivery account verify ho gaya hai. Ab aap delivery orders receive kar sakte hain!',
-          { type: 'DRIVER_STATUS', status: 'Approved' }
-        ).catch(() => {});
+        sendPushNotification({
+          tokens: driver.fcmToken,
+          title: '🎉 Delivery Partner ID Approved',
+          body: 'Aapka delivery account verify ho gaya hai. Ab aap delivery orders receive kar sakte hain!',
+          data: { type: 'DRIVER_STATUS', status: 'Approved' }
+        }).catch((e) => console.warn('[FCM Driver Approve Error]:', e.message));
       } else if (status === 'Rejected') {
-        sendPushNotification(
-          driver.fcmToken,
-          '⚠️ Delivery Application Status',
-          rejectionReason ? `Aapka application reject ho gaya hai: ${rejectionReason}` : 'Aapki application approve nahi hui.',
-          { type: 'DRIVER_STATUS', status: 'Rejected' }
-        ).catch(() => {});
+        sendPushNotification({
+          tokens: driver.fcmToken,
+          title: '⚠️ Delivery Application Status',
+          body: rejectionReason ? `Aapka application reject ho gaya hai: ${rejectionReason}` : 'Aapki application approve nahi hui.',
+          data: { type: 'DRIVER_STATUS', status: 'Rejected' }
+        }).catch((e) => console.warn('[FCM Driver Reject Error]:', e.message));
       }
     }
 

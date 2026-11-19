@@ -155,6 +155,25 @@ router.post('/place', protectCustomer, async (req, res) => {
       orderNotes: orderNotes || '',
     });
 
+    // Notify Customer about Order Placed & Confirmed
+    try {
+      if (req.customer && req.customer.fcmToken) {
+        sendPushNotification({
+          tokens: req.customer.fcmToken,
+          title: '🎉 Order Placed & Confirmed!',
+          body: `Aapka order (#${newOrder.orderId}) safaltapoorvak book ho gaya hai. Status: Confirmed (Pending Dispatch). Delivery OTP: ${deliveryOtp}`,
+          data: {
+            orderId: newOrder.orderId,
+            category: newOrder.category || '',
+            status: 'Confirmed',
+            type: 'ORDER_CONFIRMED',
+          },
+        });
+      }
+    } catch (custPushErr) {
+      console.warn('[FCM Customer Order Place Notification Error]:', custPushErr.message);
+    }
+
     // Notify Vendor via FCM
     try {
       if (verifiedVendorId) {
@@ -164,7 +183,11 @@ router.post('/place', protectCustomer, async (req, res) => {
             tokens: vendorDoc.fcmToken,
             title: '🔔 Naya Order Prapt Hua!',
             body: `${newOrder.customer} ne ₹${newOrder.totalAmount} ka naya order (#${newOrder.orderId}) diya hai.`,
-            data: { orderId: newOrder.orderId, type: 'NEW_ORDER' },
+            data: {
+              orderId: newOrder.orderId,
+              category: newOrder.category || '',
+              type: 'NEW_ORDER',
+            },
           });
         }
       }

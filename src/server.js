@@ -105,13 +105,22 @@ app.post('/api/test/fcm', async (req, res) => {
       targetTokens = [token];
     } else if (phone && appType) {
       if (appType === 'customer') {
-        const user = await Customer.findOne({ phone: String(phone) });
+        const cleanPhone = String(phone).trim().slice(-10);
+        const user = await Customer.findOne({
+          $or: [{ mobileNumber: cleanPhone }, { phone: cleanPhone }]
+        });
         if (user && user.fcmToken) targetTokens.push(user.fcmToken);
       } else if (appType === 'vendor') {
-        const user = await Vendor.findOne({ mobileNumber: String(phone) });
+        const cleanPhone = String(phone).trim().slice(-10);
+        const user = await Vendor.findOne({
+          $or: [{ mobileNumber: cleanPhone }, { mobileNumber: String(phone) }]
+        });
         if (user && user.fcmToken) targetTokens.push(user.fcmToken);
       } else if (appType === 'delivery') {
-        const user = await Driver.findOne({ phone: String(phone) });
+        const cleanPhone = String(phone).trim().slice(-10);
+        const user = await Driver.findOne({
+          $or: [{ phone: cleanPhone }, { phone: String(phone) }]
+        });
         if (user && user.fcmToken) targetTokens.push(user.fcmToken);
       }
     }

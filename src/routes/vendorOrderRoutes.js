@@ -138,7 +138,12 @@ router.put('/:id/accept', protectVendor, async (req, res) => {
             tokens: custDoc.fcmToken,
             title: '✅ Order Confirmed!',
             body: `${order.vendor} ne aapka order (#${order.orderId}) accept kar liya hai. Material taiyar kiya ja raha hai.`,
-            data: { orderId: order.orderId, type: 'ORDER_CONFIRMED' },
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              status: 'Confirmed',
+              type: 'ORDER_CONFIRMED',
+            },
           });
         }
       }
@@ -199,7 +204,12 @@ router.put('/:id/dispatch', protectVendor, async (req, res) => {
             tokens: custDoc.fcmToken,
             title: '🚚 Gadi Dispatch Ho Gayi!',
             body: `Aapka order (#${order.orderId}) gadi (${vehicleNumber || 'Tractor'}) se nikal chuka hai. Delivery OTP: ${order.deliveryOtp || 'Ready'}`,
-            data: { orderId: order.orderId, type: 'ORDER_DISPATCHED' },
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              status: 'Dispatched',
+              type: 'ORDER_DISPATCHED',
+            },
           });
         }
       }
@@ -217,7 +227,12 @@ router.put('/:id/dispatch', protectVendor, async (req, res) => {
             tokens: driverDoc.fcmToken,
             title: '🚨 Nayi Delivery Duty Assigned!',
             body: `${order.vendor} ne aapko Order (#${order.orderId}) assign kiya hai. Site: ${order.siteAddress}`,
-            data: { orderId: order.orderId, type: 'TRIP_ASSIGNED' },
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              status: 'Dispatched',
+              type: 'TRIP_ASSIGNED',
+            },
           });
         }
       }

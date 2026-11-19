@@ -276,8 +276,13 @@ router.post('/orders/:id/verify-and-complete', async (req, res) => {
           sendPushNotification({
             tokens: custDoc.fcmToken,
             title: '🎉 Material Delivered Ho Gaya!',
-            body: `Aapka order (#${order.orderId}) safaltapoorvak deliver ho gaya hai. Contract Bazar use karne ke liye dhanyawad!`,
-            data: { orderId: order.orderId, type: 'ORDER_DELIVERED' },
+            body: `Aapka order (#${order.orderId}) safaltapoorvak deliver ho gaya hai. Status: Delivered. Contract Bazar use karne ke liye dhanyawad!`,
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              status: 'Delivered',
+              type: 'ORDER_DELIVERED',
+            },
           });
         }
       }
@@ -294,12 +299,38 @@ router.post('/orders/:id/verify-and-complete', async (req, res) => {
             tokens: vendorDoc.fcmToken,
             title: '💰 Order Delivered & Payment Done!',
             body: `Driver ne Order (#${order.orderId}) deliver kar diya hai. Total: ₹${order.totalAmount}`,
-            data: { orderId: order.orderId, type: 'VENDOR_ORDER_DELIVERED' },
+            data: {
+              orderId: order.orderId,
+              category: order.category || '',
+              status: 'Delivered',
+              type: 'VENDOR_ORDER_DELIVERED',
+            },
           });
         }
       }
     } catch (pushErr) {
       console.warn('[FCM Deliver Vendor Error]:', pushErr.message);
+    }
+
+    // 3. Notify Driver Confirmation
+    try {
+      if (order.driverPhone) {
+        const driverDoc = await Driver.findOne({ phone: order.driverPhone });
+        if (driverDoc && driverDoc.fcmToken) {
+          sendPushNotification({
+            tokens: driverDoc.fcmToken,
+            title: '✅ Trip Successfully Completed!',
+            body: `Order (#${order.orderId}) deliver ho gaya hai. Aapki kamai add kar di gayi hai.`,
+            data: {
+              orderId: order.orderId,
+              status: 'Delivered',
+              type: 'TRIP_COMPLETED',
+            },
+          });
+        }
+      }
+    } catch (pushErr) {
+      console.warn('[FCM Deliver Driver Error]:', pushErr.message);
     }
 
     return res.status(200).json({
