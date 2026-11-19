@@ -407,7 +407,15 @@ router.post('/fcm-token', async (req, res) => {
     if (!fcmToken || (!phone && !vendorId)) {
       return res.status(400).json({ success: false, message: 'Phone/VendorId and fcmToken are required' });
     }
-    const filter = vendorId ? { _id: vendorId } : { mobileNumber: phone.toString().trim() };
+    const cleanPhone = phone ? phone.toString().trim().slice(-10) : '';
+    const filter = vendorId ? { _id: vendorId } : { mobileNumber: cleanPhone };
+
+    // Unbind this token from any OTHER vendor
+    await Vendor.updateMany(
+      { fcmToken, ...(vendorId ? { _id: { $ne: vendorId } } : { mobileNumber: { $ne: cleanPhone } }) },
+      { $set: { fcmToken: '' } }
+    );
+
     await Vendor.findOneAndUpdate(filter, { fcmToken });
     return res.status(200).json({ success: true, message: 'Vendor FCM token updated' });
   } catch (error) {

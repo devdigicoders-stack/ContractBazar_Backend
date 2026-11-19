@@ -522,7 +522,15 @@ router.post('/fcm-token', async (req, res) => {
     if (!fcmToken || (!phone && !driverId)) {
       return res.status(400).json({ success: false, message: 'Phone/DriverId and fcmToken are required' });
     }
-    const filter = driverId ? { _id: driverId } : { phone: phone.toString().trim() };
+    const cleanPhone = phone ? phone.toString().trim().slice(-10) : '';
+    const filter = driverId ? { _id: driverId } : { phone: cleanPhone };
+
+    // Unbind this token from any OTHER driver
+    await Driver.updateMany(
+      { fcmToken, ...(driverId ? { _id: { $ne: driverId } } : { phone: { $ne: cleanPhone } }) },
+      { $set: { fcmToken: '' } }
+    );
+
     await Driver.findOneAndUpdate(filter, { fcmToken });
     return res.status(200).json({ success: true, message: 'Driver FCM token updated' });
   } catch (error) {

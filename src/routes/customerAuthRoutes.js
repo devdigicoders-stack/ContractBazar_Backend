@@ -163,6 +163,15 @@ router.post('/fcm-token', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone and fcmToken are required' });
     }
     const cleanPhone = phone.trim().slice(-10);
+
+    // 1. One device = one active user rule:
+    // If this device token is already linked with any OTHER customer account, unbind it first!
+    await Customer.updateMany(
+      { fcmToken, mobileNumber: { $ne: cleanPhone } },
+      { $set: { fcmToken: '' } }
+    );
+
+    // 2. Link the token strictly to the currently logged in customer
     await Customer.findOneAndUpdate(
       { mobileNumber: cleanPhone },
       { fcmToken },
