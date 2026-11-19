@@ -85,6 +85,7 @@ app.use('/api/vendor/settings', require('./routes/vendorSettingsRoutes'));
 
 // Delivery App Authentication & Order Dispatch Routes
 app.use('/api/delivery/auth', require('./routes/deliveryAuthRoutes'));
+app.use('/api/delivery', require('./routes/deliveryAuthRoutes'));
 
 // Admin Routes
 app.use('/api/admin/auth', require('./routes/adminAuthRoutes'));
