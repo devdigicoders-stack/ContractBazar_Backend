@@ -11,16 +11,28 @@ async function notifySubscribersOnRestock(product, oldStock, newStock) {
     const isNowInStock = newStock > 0 && product.inStock === true;
 
     if (wasOutOfStock && isNowInStock && product.stockSubscribers && product.stockSubscribers.length > 0) {
-      const tokens = product.stockSubscribers
-        .map((s) => s.fcmToken)
-        .filter((tok) => tok && tok.length > 10);
+      const Customer = require('../models/Customer');
+      // Resolve valid FCM tokens for subscribers
+      const tokens = [];
+      for (const sub of product.stockSubscribers) {
+        if (sub.fcmToken && sub.fcmToken.length > 10) {
+          tokens.push(sub.fcmToken);
+        } else if (sub.phone) {
+          const cust = await Customer.findOne({ mobileNumber: sub.phone.toString().trim() });
+          if (cust && cust.fcmToken && cust.fcmToken.length > 10) {
+            tokens.push(cust.fcmToken);
+          }
+        }
+      }
 
-      if (tokens.length > 0) {
-        console.log(`[Restock Alert] Notifying ${tokens.length} customers for product: ${product.name}`);
+      const uniqueTokens = [...new Set(tokens)];
+
+      if (uniqueTokens.length > 0) {
+        console.log(`[Restock Alert] Sending push notification to ${uniqueTokens.length} customer(s) for restocked item: ${product.name}`);
         await sendPushNotification({
-          tokens,
+          tokens: uniqueTokens,
           title: '🎉 Item Back In Stock!',
-          body: `${product.name} ab uplabdh hai! Jaldi order karein isse pehle ki stock khatam ho jaye.`,
+          body: `${product.name} ab uplabdh hai! Turant order karein isse pehle ki stock phir se khatam ho jaye.`,
           data: {
             productId: product._id.toString(),
             category: product.categoryName || '',

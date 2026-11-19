@@ -203,10 +203,17 @@ router.post('/products/:id/notify-me', async (req, res) => {
     );
 
     if (!alreadySubscribed) {
+      let resolvedToken = fcmToken;
+      if (!resolvedToken && phone) {
+        const Customer = require('../models/Customer');
+        const cust = await Customer.findOne({ mobileNumber: phone.toString().trim() });
+        if (cust && cust.fcmToken) resolvedToken = cust.fcmToken;
+      }
+
       product.stockSubscribers.push({
         customerId: customerId || null,
         phone: phone || '',
-        fcmToken: fcmToken || '',
+        fcmToken: resolvedToken || '',
         subscribedAt: new Date(),
       });
       await product.save();
