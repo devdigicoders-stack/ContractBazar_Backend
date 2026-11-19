@@ -195,10 +195,12 @@ router.put('/:id', protectVendor, async (req, res) => {
       }
     });
 
-    if (product.availableStock !== undefined && product.availableStock <= 0) {
-      product.inStock = false;
-    } else if (product.availableStock > 0 && req.body.inStock === undefined) {
-      product.inStock = true;
+    if (product.availableStock !== undefined) {
+      if (product.availableStock <= 0) {
+        product.inStock = false;
+      } else {
+        product.inStock = true;
+      }
     }
 
     await product.save();
@@ -244,14 +246,16 @@ router.put('/:id/rate', protectVendor, async (req, res) => {
 
     if (price !== undefined) product.price = Number(price);
     if (discountPrice !== undefined) product.discountPrice = discountPrice ? Number(discountPrice) : null;
-    if (inStock !== undefined) product.inStock = Boolean(inStock);
     if (availableStock !== undefined) {
       product.availableStock = Number(availableStock);
+      // If stock > 0, automatically mark product inStock as true! If stock <= 0, mark inStock as false.
       if (product.availableStock <= 0) {
         product.inStock = false;
-      } else if (inStock === undefined) {
+      } else {
         product.inStock = true;
       }
+    } else if (inStock !== undefined) {
+      product.inStock = Boolean(inStock);
     }
 
     await product.save();
